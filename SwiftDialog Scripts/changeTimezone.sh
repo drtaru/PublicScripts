@@ -100,9 +100,7 @@ else
 fi
 
 # Get Timezones and format them for dialog. Please if anyone can clean this up feel free!
-timezones=("${(@)${(@)${(f)$(systemsetup -listtimezones | awk '{$1=$1;print}')}##[[:space:]]##}[2,-1]}")
-timezones=$( sed 's/ /,/g' <<< "$timezones" )
-timezones=$( echo "${timezones}" | tr ',' '\n' | uniq | sed -e 's/^/\"/' -e 's/$/\",/' -e '$ s/.$//' )
+timezones=$( systemsetup -listtimezones | awk 'NR>1 {print $1}' | sed 's/ /,/g' | tr ',' '\n' | uniq | sed -e 's/^/\"/' -e 's/$/",/' -e '$ s/.$//' )
 
 
 timeJSON='{
