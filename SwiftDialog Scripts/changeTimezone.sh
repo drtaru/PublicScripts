@@ -19,6 +19,14 @@ currentUser=$(scutil <<< "show State:/Users/ConsoleUser" | awk '/Name :/ { print
 dialogApp="/Library/Application\ Support/Dialog/Dialog.app/Contents/MacOS/Dialog"
 dialogBinary="/usr/local/bin/dialog"
 
+####### Configuration
+#
+# To allow your users to select from a list of regions set regionChoice to true
+# To lock a region set regionChoice to false and set regionFilter to one of the following
+# Africa, America, Antarctica, Asia, Atlantic, Australia, Europe, GMT, Indian, Pacific
+#
+regionChoice="true"
+regionFilter=""
 
 
 # Functions
@@ -90,6 +98,7 @@ function get_json_value() {
 dialogCheck
 
 # Setup temp command file
+regionCommandFile=$( mktemp /var/tmp/dialogRegion.XXX )
 timeCommandFile=$( mktemp /var/tmp/dialogTime.XXX )
 
 # Get Branding Image if exists. replace icon="none" with a url or path to icon if not using Jamf branding
@@ -99,10 +108,73 @@ else
     icon="none"
 fi
 
-# Get Timezones and format them for dialog. Please if anyone can clean this up feel free!
-timezones=$( systemsetup -listtimezones | awk 'NR>1 {print $1}' | sed 's/ /,/g' | tr ',' '\n' | uniq | sed -e 's/^/\"/' -e 's/$/",/' -e '$ s/.$//' )
+if [[ $regionChoice == "true" ]]; then
+
+    # Build the JSON for the Region Dialog
+    regionJSON='{
+        "title" : "Time Zone Update",
+        "message" : "Please select a region from the following list and click Continue",
+        "alignment" : "center",
+        "selectitems" : [
+            { "title" : "Region",
+                "default" : "All",
+                "values" : [
+                    "All",
+                    "Africa",
+                    "America",
+                    "Antarctica",
+                    "Asia",
+                    "Atlantic",
+                    "Australia",
+                    "Europe",
+                    "GMT",
+                    "Indian",
+                    "Pacific"
+                ]
+            }
+        ],
+        "icon" : "'$icon'",
+        "button1text" : "Continue",
+        "button2text" : "Cancel",
+        "titlefont" : "shadow=true, size=40",
+        "messagefont" : "size=20",
+        "height" : "200",
+        "ontop" : 1
+    }'
+
+    echo "$regionJSON" > "$regionCommandFile"
+    regionResults=$( eval "${dialogApp} --jsonfile ${regionCommandFile} --json" )
+
+    # Evaluate User Input
+    if [[ -z "${regionResults}" ]]; then
+        regionReturnCode="2"
+    else
+        regionReturnCode="0"
+    fi
+
+    case "${regionReturnCode}" in
+        0)  # Process exit code 0 scenario here
+
+            selectedRegion=$(get_json_value "$regionResults" "Region" "selectedValue" )
+            if [[ "$selectedRegion" == "All" ]]; then
+                echo "User selected All regions and clicked Continue"
+                regionFilter=""
+            else
+                echo "User selected $selectedRegion and clicked Continue"
+                regionFilter="${selectedRegion}"
+            fi
+            ;;
+        2)  # Process exit code 2 scenario here
+            echo "User clicked Quit"
+            ;;
+    esac
+fi
+
+# Get Timezones and format them for dialog.
+timezones=$( systemsetup -listtimezones | awk 'NR>1 {print $1}' | tr ' ' '\n' | grep "${regionFilter}" | sed -e 's/^/\"/' -e 's/$/",/' -e '$ s/.$//' )
 
 
+# Build the JSON for the Timezone Dialog
 timeJSON='{
     "title" : "Time Zone Update",
     "message" : "Please select the correct Time Zone from the following list and click Set",
@@ -142,6 +214,7 @@ case "${timezoneReturnCode}" in
         currentTimezone=$(systemsetup -gettimezone | awk '{ print $3}')
         if [[ "$selectedTimezone" != "$currentTimezone" ]]; then
             echo "Something went wrong, System Timezone of $currentTimezone does not match selected timezone of $selectedTimezone"
+            rm -rf $regionCommandFile
             rm -rf $timeCommandFile
             exit 1
         else
@@ -153,5 +226,6 @@ case "${timezoneReturnCode}" in
         ;;
 esac
 
+rm -rf $regionCommandFile
 rm -rf $timeCommandFile
 exit 0
